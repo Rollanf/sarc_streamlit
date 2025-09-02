@@ -23,7 +23,15 @@ if "hf_token" not in st.secrets:
 API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-mnli"
 headers = {"Authorization": f"Bearer {st.secrets['hf_token']}"}
 
-# 📡 Функция отправки запроса к Hugging Face
+# 🧠 Инициализация ParaPhaseSpace в session_state
+if 'paraphase_space' not in st.session_state:
+    st.session_state.paraphase_space = ParaPhaseSpace()
+    st.session_state.paraphase_initialized = True
+else:
+    st.session_state.paraphase_initialized = False
+
+# 📡 Функция отправки запроса к Hugging Face (с кэшированием)
+@st.cache_data
 def query_hf(text: str, labels: list):
     payload = {
         "inputs": text,
@@ -36,7 +44,7 @@ def query_hf(text: str, labels: list):
     except Exception as e:
         return {"error": str(e)}
 
-# 🧭 Интерфейс конфигурации
+# 🧭 Интерфейс конфигурации и ввода
 with st.sidebar:
     st.header("Конфигурация")
     bundle_type_str = st.selectbox("Выбери тип связки (Bundle)", [
@@ -44,13 +52,14 @@ with st.sidebar:
     ])
     phase_mode = st.radio("Режим фазы", ["Инициализация", "Активация", "Наблюдение"])
     use_paraphase = st.checkbox("Активировать ParaPhaseSpace")
+    st.header("Ввод")
+    input_text = st.text_area("Введите текст для анализа:", height=150)
+    candidate_labels_str = st.text_input("Введите метки для анализа (через запятую):", "Аналитическая, Потоковая, Структурная")
     run_button = st.button("Анализировать")
 
 # ▶️ Анализ
-if run_button:
-    input_text = "Это прототип фазовой архитектуры"
-    candidate_labels = ["Аналитическая", "Потоковая", "Структурная"]
-
+if run_button and input_text:
+    candidate_labels = [label.strip() for label in candidate_labels_str.split(',')]
     st.info("🔍 Отправка на Hugging Face...")
     result = query_hf(input_text, candidate_labels)
 
@@ -58,6 +67,12 @@ if run_button:
         st.error(f"Ошибка запроса: {result['error']}")
     else:
         st.success(f"Результаты (Режим: {phase_mode}, Тип: {bundle_type_str}):")
+
+        # 📊 Визуализация резонанса
+        st.markdown("### 📊 Визуализация смыслового резонанса:")
+        scores_data = [{"label": label, "score": score} for label, score in zip(result['labels'], result['scores'])]
+        st.bar_chart(scores_data, x="label", y="score")
+
         st.json(result)
 
         # 🧱 Создание связки и блока
@@ -84,14 +99,14 @@ if run_button:
         except Exception as e:
             st.warning(f"⚠️ Не удалось создать фазовые объекты: {e}")
 
-        # 🌐 Активация ParaPhaseSpace (если отмечено)
+        # 🌐 Активация ParaPhaseSpace
         if use_paraphase:
             try:
-                space = ParaPhaseSpace()
+                space = st.session_state.paraphase_space
                 # Добавляем контекст фазы (при условии, что метод определён)
                 if hasattr(space, "add_context"):
                     space.add_context(name=phase_mode, metadata={
-                        "weight": 1.0,
+                        "weight": result['scores'][0], # Привязка веса к результату анализа
                         "state": "active",
                         "trigger": bundle.id
                     })
